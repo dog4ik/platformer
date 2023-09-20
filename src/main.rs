@@ -22,11 +22,11 @@ impl Plugin for MapPlugin {
 impl Plugin for PsysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
+            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0),
             RapierDebugRenderPlugin::default(),
         ))
         .insert_resource(RapierConfiguration {
-            gravity: Vec2::new(0.0, -200.0),
+            gravity: Vec2::new(0.0, -1000.0),
             ..Default::default()
         });
     }

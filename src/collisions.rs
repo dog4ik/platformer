@@ -96,7 +96,6 @@ pub fn spawn_ground_sensor(
     detect_ground_for: Query<(Entity, &Collider), Added<GroundDetection>>,
 ) {
     for (entity, shape) in &detect_ground_for {
-        dbg!(entity);
         if let Some(cuboid) = shape.as_cuboid() {
             let Vec2 {
                 x: half_extents_x,
