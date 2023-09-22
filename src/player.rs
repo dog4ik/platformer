@@ -26,8 +26,7 @@ pub enum MoveDirection {
 }
 
 #[derive(Bundle, Default)]
-struct SpriteAnimation {
-    sprite_sheet_bundle: SpriteSheetBundle,
+struct AnimationBundle {
     animation_indices: AnimationIndices,
     animation_timer: AnimationTimer,
 }
@@ -91,6 +90,7 @@ pub fn setup_player(
 
     let animation_indices = AnimationIndices { first: 0, last: 3 };
 
+    // TODO: bundles!
     commands.spawn((
         SpriteSheetBundle {
             texture_atlas: idle_texture_atlas_handle,
@@ -102,22 +102,21 @@ pub fn setup_player(
             },
             ..Default::default()
         },
-        animation_indices,
-        AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+        AnimationBundle {
+            animation_timer: AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+            animation_indices,
+        },
         Player,
         Climber::default(),
         GroundDetection::default(),
         MoveDirection::default(),
-        ColliderBundle {
-            collider: Collider::cuboid(8., 8.),
-            rigid_body: RigidBody::Dynamic,
-            rotation_constraints: LockedAxes::ROTATION_LOCKED,
-            friction: Friction {
-                coefficient: 0.0,
-                combine_rule: CoefficientCombineRule::Min,
-            },
-            ..Default::default()
+        Collider::cuboid(8., 8.),
+        RigidBody::KinematicPositionBased,
+        KinematicCharacterController {
+            slide: true,
+            ..default()
         },
+        KinematicCharacterControllerOutput::default(),
     ));
 }
 
@@ -154,17 +153,28 @@ pub fn movement(
     input: Res<Input<KeyCode>>,
     mut query: Query<
         (
-            &mut Velocity,
+            &mut KinematicCharacterController,
+            &KinematicCharacterControllerOutput,
             &mut Climber,
-            &GroundDetection,
             &mut MoveDirection,
         ),
         With<Player>,
     >,
 ) {
-    for (mut velocity, mut climber, ground_detection, mut direction) in &mut query {
-        let right = if input.pressed(KeyCode::E) { 1. } else { 0. };
-        let left = if input.pressed(KeyCode::A) { 1. } else { 0. };
+    for (mut controller, output, mut climber, mut direction) in &mut query {
+        let right = if input.pressed(KeyCode::E) || input.pressed(KeyCode::Right) {
+            1.
+        } else {
+            0.
+        };
+        let left = if input.pressed(KeyCode::A) || input.pressed(KeyCode::Left) {
+            1.
+        } else {
+            0.
+        };
+        let mut transition_vector = output.effective_translation;
+
+        transition_vector.x = (right - left) * 4.;
 
         if left == 1. {
             *direction = MoveDirection::Left;
@@ -173,8 +183,6 @@ pub fn movement(
         } else {
             *direction = MoveDirection::Idle;
         }
-
-        velocity.linvel.x = (right - left) * 150.;
 
         if climber.intersecting_climbables.is_empty() {
             climber.climbing = false;
@@ -186,13 +194,18 @@ pub fn movement(
             let up = if input.pressed(KeyCode::W) { 1. } else { 0. };
             let down = if input.pressed(KeyCode::S) { 1. } else { 0. };
 
-            velocity.linvel.y = (up - down) * 200.;
+            transition_vector.y += (up - down) * 2.;
         }
 
-        if input.just_pressed(KeyCode::Space) && (ground_detection.on_ground || climber.climbing) {
-            velocity.linvel.y = 850.;
+        if (input.just_pressed(KeyCode::Space) || input.just_pressed(KeyCode::Up))
+            && (output.grounded || climber.climbing)
+        {
+            transition_vector.y += 10.;
             climber.climbing = false;
+        } else {
+            transition_vector.y -= 1.;
         }
+        controller.translation = Some(transition_vector);
     }
 }
 
