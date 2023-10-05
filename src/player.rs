@@ -1,21 +1,26 @@
 use bevy::prelude::*;
+use bevy_ecs_ldtk::prelude::LdtkEntity;
 use bevy_rapier2d::prelude::*;
 
-use crate::collisions::{Climber, ColliderBundle, GroundDetection};
+use crate::{
+    collisions::ColliderBundle,
+    creature::{CreatureBundle, Damage, Health},
+    ladder::Climber,
+};
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub struct AnimationIndices {
     pub first: usize,
     pub last: usize,
 }
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub struct AnimationTimer(pub Timer);
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub struct Player;
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub enum MoveDirection {
     Up,
     Right,
@@ -26,9 +31,9 @@ pub enum MoveDirection {
 }
 
 #[derive(Bundle, Default)]
-struct AnimationBundle {
-    animation_indices: AnimationIndices,
-    animation_timer: AnimationTimer,
+pub struct AnimationBundle {
+    pub animation_indices: AnimationIndices,
+    pub animation_timer: AnimationTimer,
 }
 
 #[derive(Resource)]
@@ -53,12 +58,22 @@ pub fn animate_sprite(
         let AnimationTimer(timer) = &mut *timer;
         timer.tick(time.delta());
         if timer.just_finished() {
+            if sprite.index >= indicies.last {
+                sprite.index = 0;
+                continue;
+            }
             sprite.index = if sprite.index == indicies.last {
                 indicies.first
             } else {
                 sprite.index + 1
             }
         };
+    }
+}
+
+pub fn scale_player(mut q: Query<&mut Transform, Added<Player>>) {
+    if let Ok(mut player_transform) = q.get_single_mut() {
+        player_transform.scale = Vec3::splat(1.5);
     }
 }
 
@@ -83,41 +98,10 @@ pub fn setup_player(
     let fall_texture_atlas_handle = texture_atlases.add(fall_texture_atlas);
 
     commands.insert_resource(PlayerAtlases {
-        idle: idle_texture_atlas_handle.clone(),
+        idle: idle_texture_atlas_handle,
         run: run_texture_atlas_handle,
         fall: fall_texture_atlas_handle,
     });
-
-    let animation_indices = AnimationIndices { first: 0, last: 3 };
-
-    // TODO: bundles!
-    commands.spawn((
-        SpriteSheetBundle {
-            texture_atlas: idle_texture_atlas_handle,
-            sprite: TextureAtlasSprite::new(animation_indices.first),
-            transform: Transform {
-                translation: (150., 150., 100.).into(),
-                scale: Vec3::splat(1.4),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        AnimationBundle {
-            animation_timer: AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
-            animation_indices,
-        },
-        Player,
-        Climber::default(),
-        GroundDetection::default(),
-        MoveDirection::default(),
-        Collider::cuboid(8., 8.),
-        RigidBody::KinematicPositionBased,
-        KinematicCharacterController {
-            slide: true,
-            ..default()
-        },
-        KinematicCharacterControllerOutput::default(),
-    ));
 }
 
 pub fn update_animation_state(
@@ -126,25 +110,44 @@ pub fn update_animation_state(
         (
             &mut TextureAtlasSprite,
             &MoveDirection,
+            &mut AnimationIndices,
             &mut Handle<TextureAtlas>,
         ),
         With<Player>,
     >,
 ) {
-    for (mut sprite, direction, mut texture) in &mut query {
+    for (mut sprite, direction, mut indicies, mut texture) in &mut query {
         match *direction {
             MoveDirection::Right => {
                 sprite.flip_x = false;
+                indicies.last = 3;
+                if sprite.index > 3 {
+                    sprite.index = 0;
+                }
                 *texture = assets.run.clone();
             }
             MoveDirection::Left => {
                 sprite.flip_x = true;
+                indicies.last = 3;
+                if sprite.index > 3 {
+                    sprite.index = 0;
+                }
                 *texture = assets.run.clone();
             }
             MoveDirection::Idle => {
+                indicies.last = 3;
+                if sprite.index > 3 {
+                    sprite.index = 0;
+                }
                 *texture = assets.idle.clone();
             }
-            _ => todo!(),
+            MoveDirection::Up | MoveDirection::Down => {
+                indicies.last = 1;
+                if sprite.index > 1 {
+                    sprite.index = 0;
+                }
+                *texture = assets.fall.clone();
+            }
         };
     }
 }
@@ -176,7 +179,9 @@ pub fn movement(
 
         transition_vector.x = (right - left) * 4.;
 
-        if left == 1. {
+        if !output.grounded {
+            *direction = MoveDirection::Up;
+        } else if left == 1. {
             *direction = MoveDirection::Left;
         } else if right == 1. {
             *direction = MoveDirection::Right;
@@ -186,24 +191,29 @@ pub fn movement(
 
         if climber.intersecting_climbables.is_empty() {
             climber.climbing = false;
-        } else if input.just_pressed(KeyCode::W) || input.just_pressed(KeyCode::S) {
+        } else if input.just_pressed(KeyCode::Comma) || input.just_pressed(KeyCode::O) {
             climber.climbing = true;
         }
 
         if climber.climbing {
-            let up = if input.pressed(KeyCode::W) { 1. } else { 0. };
-            let down = if input.pressed(KeyCode::S) { 1. } else { 0. };
+            let up = if input.pressed(KeyCode::Comma) {
+                1.
+            } else {
+                0.
+            };
+            let down = if input.pressed(KeyCode::O) { 1. } else { 0. };
 
-            transition_vector.y += (up - down) * 2.;
+            transition_vector.y = (up - down) * 2.;
         }
 
         if (input.just_pressed(KeyCode::Space) || input.just_pressed(KeyCode::Up))
             && (output.grounded || climber.climbing)
         {
             transition_vector.y += 10.;
-            climber.climbing = false;
         } else {
-            transition_vector.y -= 1.;
+            if !climber.climbing {
+                transition_vector.y -= 1.;
+            }
         }
         controller.translation = Some(transition_vector);
     }
@@ -211,10 +221,79 @@ pub fn movement(
 
 #[derive(Bundle)]
 pub struct PlayerBundle {
-    pub sprite_sheet_bundle: SpriteSheetBundle,
-    pub animation_indices: AnimationIndices,
-    pub collider_bundle: ColliderBundle,
+    pub creature_bundle: CreatureBundle,
     pub player: Player,
     pub climber: Climber,
-    pub ground_detection: GroundDetection,
+}
+
+impl LdtkEntity for PlayerBundle {
+    fn bundle_entity(
+        entity_instance: &bevy_ecs_ldtk::EntityInstance,
+        layer_instance: &bevy_ecs_ldtk::prelude::LayerInstance,
+        tileset: Option<&Handle<Image>>,
+        tileset_definition: Option<&bevy_ecs_ldtk::prelude::TilesetDefinition>,
+        _asset_server: &AssetServer,
+        texture_atlases: &mut Assets<TextureAtlas>,
+    ) -> Self {
+        let animation_indices = AnimationIndices { first: 0, last: 3 };
+        let tileset_definition = tileset_definition.unwrap();
+        let texture_atlas = TextureAtlas::from_grid(
+            tileset.unwrap().clone(),
+            Vec2::new(
+                entity_instance.tile.unwrap().w as f32,
+                entity_instance.tile.unwrap().h as f32,
+            ),
+            1,
+            1,
+            Some(Vec2::splat(tileset_definition.padding as f32)),
+            Some(Vec2::new(
+                entity_instance.tile.unwrap().x as f32,
+                entity_instance.tile.unwrap().y as f32,
+            )),
+        );
+        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+
+        let transform = Transform {
+            translation: Vec3::new(
+                (entity_instance.px.x + layer_instance.px_total_offset_x) as f32,
+                (entity_instance.px.y + layer_instance.px_total_offset_y) as f32,
+                1.0,
+            ),
+            rotation: Quat::from_rotation_x(22.),
+            scale: Vec3::splat(4.),
+        };
+        let sprite_sheet_bundle = SpriteSheetBundle {
+            sprite: TextureAtlasSprite::new(0),
+            texture_atlas: texture_atlas_handle,
+            transform,
+            ..Default::default()
+        };
+
+        Self {
+            climber: Climber::default(),
+            creature_bundle: CreatureBundle {
+                animation_bundle: AnimationBundle {
+                    animation_timer: AnimationTimer(Timer::from_seconds(0.2, TimerMode::Repeating)),
+                    animation_indices,
+                },
+                health: Health(100),
+                damage: Damage(20),
+                sprite: sprite_sheet_bundle,
+                character_controller: KinematicCharacterController {
+                    slide: true,
+                    apply_impulse_to_dynamic_bodies: true,
+                    filter_flags: QueryFilterFlags::from_bits(24).unwrap(),
+                    ..default()
+                },
+                collider_bundle: ColliderBundle {
+                    rigid_body: RigidBody::KinematicPositionBased,
+                    collider: Collider::cuboid(4., 8.),
+                    rotation_constraints: LockedAxes::ROTATION_LOCKED,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            player: Player,
+        }
+    }
 }

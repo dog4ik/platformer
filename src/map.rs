@@ -5,6 +5,8 @@ use bevy::{
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 
+use crate::player::Player;
+
 pub fn setup_map(mut commands: Commands, assets: Res<AssetServer>) {
     let map = assets.load("map.ldtk");
     commands.spawn(LdtkWorldBundle {
@@ -16,9 +18,15 @@ pub fn setup_map(mut commands: Commands, assets: Res<AssetServer>) {
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default, Component)]
 pub struct Wall;
 
-#[derive(Clone, Debug, Default, Bundle, LdtkIntCell)]
+#[derive(Clone, Debug, Default, Bundle)]
 pub struct WallBundle {
     wall: Wall,
+}
+
+impl LdtkIntCell for WallBundle {
+    fn bundle_int_cell(_int_grid_cell: IntGridCell, _layer_instance: &LayerInstance) -> Self {
+        Self { wall: Wall }
+    }
 }
 
 /// Spawns heron collisions for the walls of a level
@@ -185,5 +193,36 @@ pub fn spawn_wall_collision(
                 });
             }
         });
+    }
+}
+
+pub fn update_level_selection(
+    level_query: Query<(&Transform, &Handle<LdtkLevel>), Without<Player>>,
+    player_query: Query<&Transform, With<Player>>,
+    mut level_selection: ResMut<LevelSelection>,
+    ldtk_levels: Res<Assets<LdtkLevel>>,
+) {
+    if let Ok(player_transform) = &player_query.get_single() {
+        for (level_transform, level_handle) in &level_query {
+            if let Some(ldtk_level) = ldtk_levels.get(level_handle) {
+                let level_bounds = Rect {
+                    min: Vec2::new(level_transform.translation.x, level_transform.translation.y),
+                    max: Vec2::new(
+                        level_transform.translation.x + ldtk_level.level.px_wid as f32,
+                        level_transform.translation.y + ldtk_level.level.px_hei as f32,
+                    ),
+                };
+
+                let is_player_in_bounds = player_transform.translation.x < level_bounds.max.x
+                    && player_transform.translation.x > level_bounds.min.x
+                    && player_transform.translation.y < level_bounds.max.y
+                    && player_transform.translation.y > level_bounds.min.y;
+
+                if !is_player_in_bounds {
+                    *level_selection = LevelSelection::Iid(ldtk_level.level.iid.clone());
+                    info!("switched level");
+                }
+            }
+        }
     }
 }
