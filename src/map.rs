@@ -5,7 +5,7 @@ use bevy::{
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 
-use crate::player::Player;
+use crate::{collisions::GameCollisions, particles::Paticle, player::Player};
 
 pub fn setup_map(mut commands: Commands, assets: Res<AssetServer>) {
     let map = assets.load("map.ldtk");
@@ -179,6 +179,7 @@ pub fn spawn_wall_collision(
                                     * grid_size as f32
                                     / 2.,
                             ))
+                            .insert(CollisionGroups::from(GameCollisions::Wall.into()))
                             .insert(RigidBody::Fixed)
                             .insert(Friction::new(1.0))
                             .insert(Transform::from_xyz(
@@ -197,12 +198,13 @@ pub fn spawn_wall_collision(
 }
 
 pub fn update_level_selection(
+    mut commands: Commands,
     level_query: Query<(&Transform, &Handle<LdtkLevel>), Without<Player>>,
-    player_query: Query<&Transform, With<Player>>,
+    entities_query: Query<(&Transform, Entity), (With<Paticle>, With<Player>)>,
     mut level_selection: ResMut<LevelSelection>,
     ldtk_levels: Res<Assets<LdtkLevel>>,
 ) {
-    if let Ok(player_transform) = &player_query.get_single() {
+    if let Ok((player_transform, entity)) = &entities_query.get_single() {
         for (level_transform, level_handle) in &level_query {
             if let Some(ldtk_level) = ldtk_levels.get(level_handle) {
                 let level_bounds = Rect {
@@ -221,6 +223,7 @@ pub fn update_level_selection(
                 if !is_player_in_bounds {
                     *level_selection = LevelSelection::Iid(ldtk_level.level.iid.clone());
                     info!("switched level");
+                    commands.entity(*entity).despawn();
                 }
             }
         }

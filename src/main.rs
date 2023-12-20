@@ -4,18 +4,22 @@ use bevy_rapier2d::prelude::*;
 use platformer::{
     camera::{camera_fit_inside_current_level, setup_camera},
     collisions::{detect_climb_range, detect_player_damage},
+    creature::detect_creature_death,
     enemy::{patrol, EnemyBundle},
-    inventory::{consume_selected_item, Inventory},
-    items::{pickup_item, AppleBundle, MeatBundle, PillsBundle},
+    inventory::{
+        consume_selected_item, move_drag_objects, slot_buttons_system, toggle_inventory,
+        update_inventory_ui, update_selected_slot, Inventory, InventoryDragState,
+    },
+    items::{generate_assets_for_entries, pickup_item, EntitiesResource, ItemBundle},
     ladder::LadderBundle,
     map::{setup_map, spawn_wall_collision, update_level_selection, WallBundle},
     player::{
         animate_sprite, movement, scale_player, setup_player, update_animation_state, PlayerBundle,
     },
-    projectile::{despawn_projectiles, shoot_projectile, ProjectilesGlobalAmount},
-    ui::{
-        setup_ui, slot_buttons_system, update_health_ui, update_inventory_ui, update_selected_slot,
+    projectile::{
+        despawn_projectiles, projectiles_collisions, shoot_projectile, ProjectilesGlobalAmount,
     },
+    ui::{setup_ui, update_health_ui},
 };
 
 struct Game;
@@ -26,15 +30,20 @@ struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                update_health_ui,
-                update_inventory_ui,
-                update_selected_slot,
-                slot_buttons_system,
-            ),
-        );
+        app.insert_resource(InventoryDragState::default())
+            .insert_resource(EntitiesResource::default())
+            .add_systems(
+                Update,
+                (
+                    generate_assets_for_entries,
+                    update_health_ui,
+                    update_inventory_ui,
+                    update_selected_slot,
+                    slot_buttons_system,
+                    toggle_inventory,
+                    move_drag_objects,
+                ),
+            );
     }
 }
 
@@ -49,7 +58,7 @@ impl Plugin for HelperPlugin {
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(LdtkPlugin::default())
+        app.add_plugins(LdtkPlugin)
             .insert_resource(LevelSelection::Uid(0))
             .insert_resource(LdtkSettings {
                 level_spawn_behavior: LevelSpawnBehavior::UseZeroTranslation,
@@ -61,7 +70,7 @@ impl Plugin for MapPlugin {
 impl Plugin for PsysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0),
+            RapierPhysicsPlugin::<NoUserData>::default(),
             RapierDebugRenderPlugin::default(),
         ))
         .insert_resource(RapierConfiguration {
@@ -80,27 +89,27 @@ impl Plugin for Game {
                 Update,
                 (
                     scale_player,
-                    movement,
                     update_animation_state,
-                    animate_sprite,
+                    detect_creature_death,
                     camera_fit_inside_current_level,
                     spawn_wall_collision,
                     shoot_projectile,
                     despawn_projectiles,
+                    projectiles_collisions,
                     detect_climb_range,
                     patrol,
                     update_level_selection,
                     detect_player_damage,
                     pickup_item,
                     consume_selected_item,
+                    animate_sprite,
                 ),
             )
+            .add_systems(FixedUpdate, (movement,))
             .register_ldtk_int_cell::<WallBundle>(1)
             .register_ldtk_entity::<EnemyBundle>("Mob")
             .register_ldtk_entity::<PlayerBundle>("Player")
-            .register_ldtk_entity::<AppleBundle>("Apple")
-            .register_ldtk_entity::<MeatBundle>("Meat")
-            .register_ldtk_entity::<PillsBundle>("Pills")
+            .register_default_ldtk_entity_for_layer::<ItemBundle>("Items")
             .register_ldtk_int_cell::<LadderBundle>(2)
             .register_ldtk_int_cell::<WallBundle>(3);
     }

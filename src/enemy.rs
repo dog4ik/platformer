@@ -2,12 +2,16 @@ use bevy::prelude::*;
 use bevy_ecs_ldtk::{prelude::*, utils::ldtk_pixel_coords_to_translation_pivoted};
 use bevy_rapier2d::prelude::*;
 
-use crate::creature::{CreatureBundle, Damage, Health};
+use crate::{
+    collisions::GameCollisions,
+    creature::{CreatureBundle, Damage, Health},
+};
 
 #[derive(Component, Default)]
 pub struct Enemy;
 
-pub struct SeePlayer(pub bool);
+#[derive(Component, Default)]
+pub struct Loot(pub Vec<String>);
 
 #[derive(Default)]
 enum EnemyType {
@@ -33,6 +37,7 @@ pub struct EnemyBundle {
     pub enemy: Enemy,
     pub creature_bundle: CreatureBundle,
     pub patrol: Patrol,
+    pub loot: Loot,
 }
 
 impl LdtkEntity for EnemyBundle {
@@ -59,6 +64,19 @@ impl LdtkEntity for EnemyBundle {
                 entity_instance.tile.unwrap().y as f32,
             )),
         );
+        let loot: Vec<String> = entity_instance
+            .field_instances
+            .iter()
+            .find(|field| field.identifier == "Loot")
+            .and_then(|thing| {
+                if let FieldValue::Enums(values) = &thing.value {
+                    Some(values.iter().flatten().map(|item| item.clone()).collect())
+                } else {
+                    panic!("fields should be array of ennums")
+                }
+            })
+            .unwrap_or_default();
+
         let texture_atlas_handle = texture_atlases.add(texture_atlas);
         let sprite_sheet_bundle = SpriteSheetBundle {
             sprite: TextureAtlasSprite::default(),
@@ -77,8 +95,13 @@ impl LdtkEntity for EnemyBundle {
                 damage: Damage(5),
                 sprite: sprite_sheet_bundle,
                 collider_bundle: entity_instance.into(),
+                character_controller: KinematicCharacterController {
+                    filter_groups: Some(GameCollisions::Mob.into()),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
+            loot: Loot(loot),
             patrol: Patrol::from((entity_instance, layer_instance)),
         }
     }
